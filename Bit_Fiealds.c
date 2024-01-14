@@ -22,6 +22,7 @@ int main()
  
     // Print the difference between the two pointers
     printf("%d\n", ptr2 - ptr1);
+    printf("sizeof y = %d \n",sizeof(long int));
     printf("%ld\n", sizeof (t));
     printf("%p\n",ptr1);
     printf("%p\n",ptr2);
