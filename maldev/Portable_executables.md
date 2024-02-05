@@ -558,3 +558,87 @@ Each relocation entry gets processed by adding the RVA of the page to the image 
 
 
 
+
+# The Loader
+
+1. Read in the first page of the file with the DOS header, PE header, and section headers.
+2. Determine whether the target area of the address space is available, if not allocate another area.
+3. Using info in the section headers, map sections of the file to the appropriate places in the allocated
+address space.
+4. If the file is not loaded at its target address (ImageBase), apply relocation fix-ups.
+5. Go through list of DLLs in the imports section and load any that aren't already loaded (recursive).
+6. Resolve all the imported symbols in the imports section.
+7. Create the initial stack and heap using values from the PE header.
+8. Create the initial thread and start the process.
+
+
+
+When an executable is run, the windows loader creates a virtual address space for the process and maps the executable module from disk into the process' address space. It tries to load the image at the preferred base address but relocates it if that address is already occupied. The loader goes through the section table and maps each section at the address calculated by adding the RVA of the section to the base address. 
+The page attributes are set according to the section’s characteristic requirements. After mapping the sections in memory, the loader performs base relocations if the load address is not equal to the preferred base address in ImageBase.
+
+
+The import table is then checked and any required DLLs are mapped into the process address space. 
+fter all of the DLL modules have been located and mapped in, the loader examines each DLL's export section and the IAT is fixed to point to the actual imported function address. If the symbol does not exist (which is very rare), the loader displays an error. Once all required modules have been loaded execution passes to the app's entry point.
+
+
+The various APIs associated with loading an executable all converge on the kernel32.dll function
+LoadLibraryExW which in turn leads to the internal function LdrpLoadDll in ntdll.dll This function directly calls
+6 subroutines LdrpCheckForLoadedDll, LdrpMapDll, LdrpWalkImportDescriptor, LdrpUpdateLoadCount,
+LdrpRunInitializeRoutines, and LdrpClearLoadInProgress which perform the following tasks:
+1. Check to see if the module is already loaded.
+2. Map the module and supporting information into memory.
+3. Walk the module's import descriptor table (find other modules this one is importing).
+4. Update the module's load count as well as any others brought in by this DLL.
+5. Initialize the module.
+6. Clear some sort of flag, indicating that the load has finished.
+
+
+
+
+## Adding code to PE file
+
+#### Adding to an existing section
+
+We need a section in the file that is mapped with execution privileges in memory so  try the .text section
+We then need an area in this section occupied by 00 byte padding. This is the concept of "caves".
+The VirtualSize represents the amount of actual code. The SizeOfRaw data defines the amount of space taken up in the file sitting on your hard disk. Note that the virtual size in this case is lower than that on the hard disk. This is because compilers often have to round up the size to align a section on some boundary.
+
+
+But this extra space is totally unused and not loaded into memory. 
+We need to ensure that instructions we place there will be loaded into memory.
+
+- Change the entry point to point to the added code
+- make sure to return to normal execution after the stub is executed
+- We need to change the virtual size of the CODE section all the way up to the max size we can use (max size is the raw size in disk)
+
+
+#### Enlarging an Existing Section
+
+1. Append to the last section of the file
+
+- Mark the section as readable + executable (SectionHeader -> Characteristics)
+- Change the SizeOfImage in PE headers
+- Both append the SizeofRawData and VirtualSize in Section Header
+- SizeofCode and Size of InitializedData need adjustment in OptionalHeader
+
+
+2. Append to another section besides the last one where stub is larger than the padding bytes
+
+This is a complex matter and wont be referenced here.
+
+
+#### Creating a new section
+
+- Add 1 to NumberOfSection to the FileHeader
+- For convinience append the new section to the end of the file. (Beware that some compilers append data after the last section)
+- The address of the first byte in new section is the RawOffset in new section header.
+- Initialize the new section header. New header is going at the end of the IMAGE_SECTION_HEADERS as there is no padding there(sections are also alligned in disk and memory so propably they start in bigger address)
+- Calculate RVA and RawOffset comparing the previous section header and also take alligment into consideration.
+RVA = (previous RVA + previous VirtualSize )alligned to 1000h
+NAME1 is max 8 ascii bytes  
+SizeOfRawData and virtualSize are actually the code size in bytes
+PointerToRawData is the address we started appending bytes in disk
+Characteristics need read and executable so will be E0000060h (already reversed so dont change this!!!)
+
+! all the above are DWORD sized and need to be in reverse byte order except NAME1
+    
